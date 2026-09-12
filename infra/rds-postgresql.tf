@@ -1,7 +1,6 @@
 resource "aws_db_subnet_group" "autoflow_rds_subnets" {
   name       = "autoflow-db-subnet-group"
-  subnet_ids = aws_subnet.subnet_private[*].id
-
+  subnet_ids = data.terraform_remote_state.infra.outputs.private_subnet_ids
   tags = {
     Name = "autoflow-db-subnet-group"
   }
@@ -29,5 +28,16 @@ resource "aws_db_instance" "autoflow_rds" {
 
   tags = {
     Name = "autoflow-db"
+  }
+}
+
+
+data "terraform_remote_state" "infra" {
+  backend = "s3"
+
+  config = {
+    bucket = "state-autoflow-terraform"
+    key    = "infra/terraform.tfstate"
+    region = "us-east-1"
   }
 }
