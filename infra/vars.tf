@@ -27,3 +27,9 @@ variable "database_username" {
   description = "Usuário do banco de dados"
   type        = string
 }
+
+variable "lambda_security_group_id" {
+  description = "Security group da Lambda autorizada a acessar o RDS"
+  type        = string
+  default     = null
+}
