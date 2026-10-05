@@ -167,7 +167,7 @@ A arquitetura geral possui:
 A aplicação principal utiliza o PostgreSQL para persistência dos dados do sistema, enquanto a função Serverless de autenticação pode acessar o mesmo banco para consultar os usuários e validar as credenciais de autenticação.
 
 
-## Organização dos repositórios
+## Organização dos repositórios 
 
 O projeto AutoFlow utiliza infraestrutura separada em diferentes responsabilidades.
 
