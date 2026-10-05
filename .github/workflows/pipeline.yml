@@ -4,10 +4,6 @@ on:
   push:
     branches: ["develop", "main"]
 
-  pull_request:
-    types: [opened, synchronize, reopened]
-    branches: ["develop"]
-
 jobs:
   terraform:
     name: Deploy RDS with Terraform
