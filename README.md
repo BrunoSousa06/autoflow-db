@@ -38,7 +38,7 @@ O root declara backend S3 por meio de `infra/backend.tf` e consome o state da in
 
 O bucket/key do backend são parâmetros externos, não arquivos de exemplo versionados. Para uso local, configure `AWS_PROFILE`, `AWS_REGION`, `AWS_EXPECTED_ACCOUNT_ID`, `TF_VAR_aws_profile`, `TF_VAR_aws_allowed_account_ids` (JSON de uma lista), `TF_VAR_terraform_state_bucket`, `TF_VAR_infra_state_key` e os inputs de banco por variáveis de ambiente locais ou por mecanismo seguro. Valide a identidade com `scripts/verify_aws_account.py` antes de acessar AWS. O `terraform init` recebe `-backend-config` para bucket, key, região, `encrypt=true` e `use_lockfile=true`.
 
-O AWS Academy Learner Lab pode restringir operações por policies, boundaries, SCPs, contexto de `iam:PassRole`, quotas e duração da sessão. A saída `allowed`/`implicitDeny` de `simulate-principal-policy` é apenas uma simulação e **não garante autorização efetiva**. Inventários vazios também se limitam à conta, região e permissões consultadas. A readiness documentada para o perfil `fiap-lab` não autoriza deploy nem substitui confirmação do administrador/owner; consulte [readiness de homologação](../docs/specs/kong-gateway/09-homologacao-readiness.md).
+O AWS Academy Learner Lab pode restringir políticas, boundaries, SCPs, contexto de `iam:PassRole`, quotas e duração da sessão. A saída `allowed`/`implicitDeny` de `simulate-principal-policy` é apenas uma simulação e **não garante autorização efetiva**. Inventários também se limitam à conta, região e permissões consultadas. A homologação observada do API Gateway/RDS está registrada no [checkpoint de migração](../autoflow-infra/docs/api-gateway/progresso.md); ela não autoriza alterações futuras no banco.
 
 ## Comandos Terraform
 
