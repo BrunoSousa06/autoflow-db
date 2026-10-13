@@ -14,6 +14,13 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      TF_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
+      TF_STATE_KEY: ${{ vars.AWS_TF_STATE_KEY }}
+      TF_VAR_aws_allowed_account_ids: '["${{ vars.AWS_EXPECTED_ACCOUNT_ID }}"]'
+      TF_VAR_region_default: ${{ vars.AWS_REGION || 'us-east-1' }}
+      TF_VAR_terraform_state_bucket: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
+      TF_VAR_infra_state_key: ${{ vars.AWS_INFRA_STATE_KEY }}
       TF_VAR_database_username: ${{ secrets.DATABASE_USERNAME }}
       TF_VAR_database_password: ${{ secrets.DATABASE_PASSWORD }}
 
@@ -21,20 +28,40 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Test AWS account identity guard
+        run: python -m unittest discover -s scripts -p "test_verify_aws_account.py" -v
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: us-east-1
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Verify expected AWS account
+        env:
+          AWS_EXPECTED_ACCOUNT_ID: ${{ vars.AWS_EXPECTED_ACCOUNT_ID }}
+        run: python scripts/verify_aws_account.py
+
+      - name: Confirmar bucket Terraform previamente configurado
+        env:
+          TF_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
+          TF_STATE_KEY: ${{ vars.AWS_TF_STATE_KEY }}
+          INFRA_STATE_KEY: ${{ vars.AWS_INFRA_STATE_KEY }}
+        run: |
+          test -n "$TF_STATE_BUCKET"
+          test -n "$TF_STATE_KEY"
+          test -n "$INFRA_STATE_KEY"
+          aws s3api head-bucket --bucket "$TF_STATE_BUCKET"
+          aws s3api head-object --bucket "$TF_STATE_BUCKET" --key "$TF_STATE_KEY" > /dev/null
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
       - name: Terraform Init
         working-directory: ./infra
-        run: terraform init
+        run: terraform init -input=false -reconfigure -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="key=${TF_STATE_KEY}" -backend-config="region=${AWS_REGION}" -backend-config="encrypt=true" -backend-config="use_lockfile=true"
 
       - name: Terraform Validate
         working-directory: ./infra

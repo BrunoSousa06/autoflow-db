@@ -4,18 +4,11 @@ resource "aws_security_group" "rds_sg" {
   vpc_id      = data.terraform_remote_state.infra.outputs.vpc_id
 
   ingress {
-    description     = "Acesso a partir dos nos do EKS"
+    description     = "Acesso a partir do cluster security group do EKS"
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
-    security_groups = [data.terraform_remote_state.infra.outputs.eks_security_group_id]
-  }
-
-  ingress {
-    from_port   = 5432
-    to_port     = 5432
-    protocol    = "tcp"
-    cidr_blocks = [data.terraform_remote_state.infra.outputs.vpc_cidr_block]
+    security_groups = [data.aws_eks_cluster.autoflow.vpc_config[0].cluster_security_group_id]
   }
 
   ingress {

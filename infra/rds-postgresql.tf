@@ -19,25 +19,33 @@ resource "aws_db_instance" "autoflow_rds" {
 
   db_subnet_group_name   = aws_db_subnet_group.autoflow_rds_subnets.name
   vpc_security_group_ids = [aws_security_group.rds_sg.id]
-  publicly_accessible    = true
+  publicly_accessible    = false
 
-  skip_final_snapshot = true
-  storage_encrypted   = false
-  monitoring_interval = 0
-  monitoring_role_arn = null
+  storage_type              = "gp3"
+  storage_encrypted         = true
+  backup_retention_period   = 1
+  skip_final_snapshot       = false
+  final_snapshot_identifier = "autoflow-db-final"
+  deletion_protection       = true
+  monitoring_interval       = 0
+  monitoring_role_arn       = null
 
   tags = {
     Name = "autoflow-db"
   }
 }
 
+data "aws_eks_cluster" "autoflow" {
+  name = var.eks_cluster_name
+}
 
 data "terraform_remote_state" "infra" {
   backend = "s3"
 
   config = {
-    bucket = "state-autoflow-terraform"
-    key    = "infra/terraform.tfstate"
-    region = "us-east-1"
+    bucket  = var.terraform_state_bucket
+    key     = var.infra_state_key
+    region  = var.region_default
+    profile = var.aws_profile
   }
 }
