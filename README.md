@@ -1,195 +1,93 @@
-# AutoFlow — Infraestrutura RDS
+# AutoFlow — Infraestrutura do RDS
 
-Repositório responsável pelo provisionamento da infraestrutura de banco de dados **PostgreSQL na AWS RDS** utilizada pela aplicação AutoFlow.
+Este repositório declara recursos Terraform para o PostgreSQL gerenciado do AutoFlow na AWS. O código é configuração desejada e não comprova que o RDS ou os recursos de rede estejam implantados.
 
-A infraestrutura é gerenciada utilizando **Terraform**, permitindo que os recursos do banco de dados sejam criados e configurados de forma reproduzível e versionada.
+## Responsabilidade e dependências
 
-## Objetivo
+O root `infra/` declara uma instância Amazon RDS PostgreSQL 17, subnet group e Security Groups. Ele consome saídas do state Terraform da infraestrutura compartilhada, mantida em `autoflow-infra`. A aplicação Spring Boot e a Lambda usam o banco conforme suas configurações.
 
-Este repositório tem como objetivo provisionar e configurar o banco de dados gerenciado da aplicação AutoFlow na AWS.
-
-A infraestrutura criada inclui:
-
-* Amazon RDS PostgreSQL;
-* Subnet Group para o RDS;
-* Security Group para controle de acesso ao banco;
-* Integração com a VPC provisionada pela infraestrutura principal;
-* Persistência das informações do Terraform State em bucket S3.
-
-## Arquitetura
-
-A infraestrutura utiliza o seguinte fluxo:
-
-```text
-                 AWS
-                  │
-                  ▼
-        ┌───────────────────┐
-        │        VPC        │
-        │                   │
-        │  Private Subnets  │
-        │      ┌──────┐     │
-        │      │ RDS  │     │
-        │      │      │     │
-        │      │ PG17 │     │
-        │      └──────┘     │
-        │                   │
-        └───────────────────┘
-                  ▲
-                  │
-          Security Group
-                  ▲
-                  │
-          Aplicação AutoFlow
+```mermaid
+flowchart LR
+  Infra[autoflow-infra<br/>VPC e subnets] -->|state remoto| DB[autoflow-db<br/>RDS PostgreSQL]
+  App[autoflow<br/>API Spring Boot] -->|conexão PostgreSQL| DB
+  Lambda[autoflow-lambda<br/>função de autenticação] -->|conexão PostgreSQL| DB
 ```
 
-O RDS utiliza as subnets privadas obtidas do Terraform State da infraestrutura principal.
+O diagrama representa dependências declaradas, não conectividade ou implantação confirmada.
 
+## Esquema, migrations e seeds
 
-### Dependência entre repositórios
+O modelo relacional implementado é versionado pelo Flyway na aplicação `autoflow`, em
+[`backend/src/main/resources/db/migration`](../autoflow/backend/src/main/resources/db/migration/). As migrations
+definem usuários, clientes, veículos, ordens de serviço, serviços, peças/insumos e entidades relacionadas; constraints
+e evolução de schema devem ser lidas nas migrations. O backend executa Flyway conforme sua configuração. Este repositório
+provisiona RDS e não mantém uma cópia independente do schema.
 
-A arquitetura fica organizada da seguinte forma:
+A migration V49 deste repositório está em [`migrations/V49__corrigir_documentos_seeds_demo.sql`](migrations/V49__corrigir_documentos_seeds_demo.sql).
+Há também uma migration V49 da aplicação em [`autoflow/backend/src/main/resources/db/migration/V49__corrigir_documentos_seeds_demo.sql`](../autoflow/backend/src/main/resources/db/migration/V49__corrigir_documentos_seeds_demo.sql),
+e a aplicação possui a V50 [`V50__corrigir_documentos_staff_demo.sql`](../autoflow/backend/src/main/resources/db/migration/V50__corrigir_documentos_staff_demo.sql),
+que corrige documentos sintéticos de usuários demonstrativos não-clientes. São repositórios/localizações distintos;
+`autoflow-db` não contém V50 em `migrations/`. O checkpoint anterior reportou 47 migrations Flyway validadas,
+mas não comprova se V49/V50 foram aplicadas posteriormente no RDS. Consulte [detalhes dos seeds](docs/seeds-demonstracao.md).
 
-```text
-Terraform Infra
-      │
-      │ private_subnet_ids
-      ▼
-Terraform RDS
-      │
-      │ PostgreSQL endpoint
-      ▼
-Aplicação AutoFlow
-```
+## Configuração Terraform observada
 
-Isso permite separar o provisionamento da infraestrutura geral do provisionamento do banco de dados.
+| Propriedade | Valor declarado |
+|---|---|
+| Engine e versão | PostgreSQL 17 |
+| Classe | `db.t3.micro` |
+| Armazenamento inicial | 20 GB |
+| Nome do banco | `autoflow_db` |
+| Porta | 5432 |
+| Subnets | IDs privados lidos do state de `autoflow-infra` |
+| Acesso público | `publicly_accessible = false` |
+| Criptografia do storage | `storage_encrypted = true` |
+| Snapshot final | Obrigatório (`skip_final_snapshot = false`) |
+| Proteção contra remoção | Ativada (`deletion_protection = true`) |
+| Enhanced Monitoring | Desativado (`monitoring_interval = 0`) |
 
-## Pré-requisitos
+A configuração Terraform atual declara acesso privado, storage criptografado, snapshot final obrigatório e proteção contra remoção. Esses são valores desejados no código e não evidência do estado efetivo do RDS. O checkpoint de homologação referido abaixo documenta observações pontuais de runtime, sem comprovar configuração atual após aquela data.
 
-Para executar este projeto é necessário ter:
+## Estado e pré-requisitos
 
-* AWS CLI configurado;
-* Terraform instalado;
-* acesso à conta AWS;
-* acesso ao bucket S3 utilizado para armazenar o Terraform State;
-* infraestrutura principal previamente provisionada;
-* permissões para acessar o Terraform State da infraestrutura.
+O root declara backend S3 por meio de `infra/backend.tf` e consome o state da infraestrutura em `infra/rds-postgresql.tf`. Antes de qualquer inicialização ou plano remoto, confirme bucket, key, responsabilidade e state autoritativo com os responsáveis. Não inicialize um state vazio sobre recursos que possam existir.
 
-### Tecnologias
+O bucket/key do backend são parâmetros externos, não arquivos de exemplo versionados. Para uso local, configure `AWS_PROFILE`, `AWS_REGION`, `AWS_EXPECTED_ACCOUNT_ID`, `TF_VAR_aws_profile`, `TF_VAR_aws_allowed_account_ids` (JSON de uma lista), `TF_VAR_terraform_state_bucket`, `TF_VAR_infra_state_key` e os inputs de banco por variáveis de ambiente locais ou por mecanismo seguro. Valide a identidade com `scripts/verify_aws_account.py` antes de acessar AWS. O `terraform init` recebe `-backend-config` para bucket, key, região, `encrypt=true` e `use_lockfile=true`.
 
-* Terraform
-* AWS
-* Amazon RDS
-* PostgreSQL 17
-* Amazon S3
-* Amazon VPC
-* AWS Security Groups
+O AWS Academy Learner Lab pode restringir políticas, boundaries, SCPs, contexto de `iam:PassRole`, quotas e duração da sessão. A saída `allowed`/`implicitDeny` de `simulate-principal-policy` é apenas uma simulação e **não garante autorização efetiva**. Inventários também se limitam à conta, região e permissões consultadas. A homologação observada do API Gateway/RDS está registrada no [checkpoint de migração](../autoflow-infra/docs/api-gateway/progresso.md); ela não autoriza alterações futuras no banco.
 
-## Provisionamento
+## Comandos Terraform
 
-Inicialize o Terraform:
+Os comandos abaixo são referências de fluxo. Execute-os somente com state, conta, perfil AWS e autorização previamente confirmados:
 
 ```bash
-terraform init
-```
-
-Valide a configuração:
-
-```bash
+terraform init -backend=false -input=false
+terraform fmt -check -recursive
 terraform validate
 ```
 
-Visualize as alterações:
+Para usar backend remoto, somente após reconciliar state, passe os parâmetros aprovados em `terraform init -reconfigure -backend-config=...`. `plan`/`apply` não fazem parte da validação estática; `apply` altera recursos AWS e exige autorização explícita e revisão do plano. A configuração atual ativa proteção contra remoção e exige snapshot final; operações destrutivas continuam sujeitas a plano de recuperação aprovado.
 
-```bash
-terraform plan
-```
+## CI/CD
 
-Aplique a infraestrutura:
+Consulte o [catálogo de variables e secrets](docs/variables-and-secrets.md) e o [histórico](docs/variables-changelog.md) para configurar GitHub Actions e inputs Terraform.
 
-```bash
-terraform apply
-```
+O workflow `.github/workflows/pipeline.yml` executa CI em PRs e pushes para `develop`/`main` (guard de conta, `fmt`,
+`init -backend=false` e `validate`). CD somente por `workflow_dispatch` em `develop`, no Environment `homolog`: valida
+conta e states, cria Plan e bloqueia destruições/substituições sem autorização explícita. Apply depende do input `apply`
+e de `TERRAFORM_APPLY_APPROVAL_CONFIGURED=true`; esse guard orienta configurar Required reviewers, mas não comprova
+que estejam efetivamente configurados. A execução do deploy pelo GitHub Actions não foi comprovada por este checkout.
 
-Para remover os recursos:
+O workflow referencia Secrets `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `DATABASE_USERNAME`
+e `DATABASE_PASSWORD`. Variables incluem `AWS_REGION`, `AWS_EXPECTED_ACCOUNT_ID`, `AWS_TERRAFORM_STATE_BUCKET`,
+`AWS_TF_STATE_KEY`, `AWS_INFRA_STATE_KEY` e `TERRAFORM_APPLY_APPROVAL_CONFIGURED`. Os valores devem ser cadastrados
+no GitHub, nunca neste README.
 
-```bash
-terraform destroy
-```
+## Fontes
 
-> **Atenção:** `terraform destroy` remove a infraestrutura provisionada pelo projeto. Como o RDS está configurado com `skip_final_snapshot = true`, a remoção da instância não gera automaticamente um snapshot final.
-
-## Configuração atual do RDS
-
-| Configuração        | Valor           |
-| ------------------- | --------------- |
-| Engine              | PostgreSQL      |
-| Versão              | 17              |
-| Instance Class      | `db.t3.micro`   |
-| Storage             | 20 GB           |
-| Database            | `autoflow_db`   |
-| Região              | `us-east-1`     |
-| Subnets             | Private Subnets |
-| Porta               | 5432            |
-| Publicly Accessible | `true`          |
-| Storage Encryption  | Desabilitado    |
-| Enhanced Monitoring | Desabilitado    |
-| Final Snapshot      | Desabilitado    |
-
-## Integração com o AutoFlow 
-
-O banco RDS é utilizado pelos componentes da aplicação AutoFlow executados na AWS.
-
-A arquitetura geral possui:
-
-```text
-                         AWS
-                          │
-              ┌───────────┴───────────┐
-              │                       │
-              ▼                       ▼
-            EKS                  AWS Lambda
-              │                       │
-              │                       │
-              └───────────┬───────────┘
-                          │
-                          ▼
-                    Security Group
-                          │
-                          ▼
-                    Amazon RDS
-                          │
-                          ▼
-                  PostgreSQL 17
-                    autoflow_db
-```
-
-A aplicação principal utiliza o PostgreSQL para persistência dos dados do sistema, enquanto a função Serverless de autenticação pode acessar o mesmo banco para consultar os usuários e validar as credenciais de autenticação.
-
-
-## Organização dos repositórios 
-
-O projeto AutoFlow utiliza infraestrutura separada em diferentes responsabilidades.
-
-```text
-AutoFlow
-│
-├── Infraestrutura AWS
-│   └── VPC / EKS / Subnets
-│
-├── Infraestrutura RDS
-│   └── PostgreSQL
-│
-├── Serverless
-│   └── Lambda de autenticação
-│
-└── Aplicação
-    ├── Backend Spring Boot
-    └── Frontend Angular
-```
-
-O repositório de RDS é responsável exclusivamente pela infraestrutura do banco de dados, utilizando os recursos de rede fornecidos pelo repositório de infraestrutura principal.
-
-## Licença
-
-Projeto desenvolvido para fins acadêmicos e de estudo da arquitetura de infraestrutura como código utilizando Terraform e serviços AWS.
+- [`infra/rds-postgresql.tf`](infra/rds-postgresql.tf)
+- [`infra/sg.tf`](infra/sg.tf)
+- [`infra/backend.tf`](infra/backend.tf)
+- [Migrations e seeds demonstrativos](docs/seeds-demonstracao.md)
+- [Modelo relacional implementado](../autoflow/backend/src/main/resources/db/migration/)
+- [Visão geral dos quatro repositórios](../.agents/ai-context/02-repositories.md)
