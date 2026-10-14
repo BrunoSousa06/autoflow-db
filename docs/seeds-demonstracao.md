@@ -2,9 +2,9 @@
 
 ## Constatações
 
-A última migration encontrada no checkout da aplicação é a V48. A V40 cria os seguintes clientes e usuários `CLIENTE`:
+A migration V49 da aplicação está em `autoflow/backend/src/main/resources/db/migration/V49__corrigir_documentos_seeds_demo.sql`; ela corrige os documentos demonstrativos e snapshots de OS descritos abaixo. A V40 cria os seguintes clientes e usuários `CLIENTE`:
 
-A V49 abaixo é entregue neste repositório conforme o escopo solicitado. A localização Flyway observada fica no repositório `autoflow` (`backend/src/main/resources/db/migration`); para que a aplicação a descubra, a equipe de release deve promovê-la para essa localização no fluxo próprio, sem reescrever versões já executadas. Nenhum arquivo desse outro repositório foi alterado neste trabalho.
+Este documento registra a relação entre as migrations da aplicação e os dados gerenciados por este repositório. `autoflow-db` também contém sua própria cópia V49 em `migrations/V49__corrigir_documentos_seeds_demo.sql`; ela não deve ser confundida com a localização Flyway da aplicação. A aplicação contém ainda `V50__corrigir_documentos_staff_demo.sql`, para documentos sintéticos de usuários demonstrativos `MECANICO` e `ATENDENTE`, em `backend/src/main/resources/db/migration/`. `autoflow-db` não contém V50 em seu diretório `migrations/` e não executa nem promove migrations da aplicação.
 
 | E-mail | Documento anterior | Resultado da auditoria | Documento corrigido (V49) |
 | --- | --- | --- | --- |
@@ -39,8 +39,8 @@ O teste cria tabelas temporárias compatíveis com as constraints exercitadas e 
 
 ## Procedimento de homologação
 
-1. Confirmar com a equipe responsável que a migration V49 ainda não foi aplicada e que o banco de homologação tem histórico Flyway até V48. Não editar migrations já executadas.
+1. Consultar o histórico Flyway do banco de destino. O checkpoint de 13/10/2026 registrou 47 migrations validadas, mas não comprova o estado posterior das V49 e V50; confirmar a aplicação de cada uma e a versão atual antes de qualquer ação. Não editar migrations já executadas.
 2. Revisar o plano de execução da V49 e confirmar que os quatro e-mails estão presentes com seus vínculos usuário/cliente correspondentes. Em conflito ou seed incompleto, interromper e reconciliar os dados antes de prosseguir.
-3. Submeter/aplicar a migration somente pelo processo aprovado de Flyway em homologação; este repositório não executa essa aplicação.
+3. A aplicação Spring Boot executa Flyway conforme configuração do backend; mudanças de schema são entregues pelo repositório `autoflow`. Este repositório não aplica migrations no RDS.
 4. Consultar, após a migration, igualdade do documento entre usuário e cliente e conferir que snapshots de OS dos quatro clientes foram sincronizados, sem alteração da contagem de ordens/históricos.
-5. Validar o login via Lambda com `POST /auth/login`, payload `{"cpf_cnpj":"<documento sem máscara>","senha":"Senha@1234"}` para cada cliente e confirmar resposta HTTP 200. Este artefato e seus testes locais não comprovam implantação nem execução em homologação.
+5. Validar o login via Lambda com `POST /auth/login`, payload `{"cpf_cnpj":"<documento sintético sem máscara>","senha":"<senha sintética de teste>"}` para cada cliente e confirmar resposta HTTP 200. A migration e os testes locais não comprovam sua aplicação no RDS.
