@@ -58,6 +58,41 @@ class ReviewRdsPlanTests(unittest.TestCase):
         ):
             validate_plan(plan)
 
+    def test_replace_diagnostic_reports_attribute_names_without_values(self):
+        sensitive_value = "dont-print-this-password"
+        plan = {
+            "resource_changes": [
+                {
+                    "address": "aws_db_instance.autoflow_rds",
+                    "type": "aws_db_instance",
+                    "change": {
+                        "actions": ["delete", "create"],
+                        "replace_paths": [["allocated_storage"], ["instance_class"]],
+                        "before": {
+                            "identifier": "autoflow-db",
+                            "deletion_protection": True,
+                            "password": sensitive_value,
+                        },
+                        "after": {
+                            "identifier": "autoflow-db",
+                            "deletion_protection": True,
+                            "password": sensitive_value,
+                        },
+                    },
+                }
+            ]
+        }
+
+        with self.assertRaises(ValueError) as error:
+            validate_plan(plan)
+
+        diagnostic = str(error.exception)
+        self.assertIn("aws_db_instance.autoflow_rds", diagnostic)
+        self.assertIn("[delete,create]", diagnostic)
+        self.assertIn("allocated_storage", diagnostic)
+        self.assertIn("instance_class", diagnostic)
+        self.assertNotIn(sensitive_value, diagnostic)
+
     def test_rejects_change_to_rds_identifier_or_backup_configuration(self):
         for attribute, rule in (
             ("identifier", "protect_rds_identifier"),

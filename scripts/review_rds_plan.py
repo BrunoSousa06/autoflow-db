@@ -1,6 +1,7 @@
 """Aplica uma política fail-closed ao plano binário de Terraform do RDS."""
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +13,21 @@ PROTECTED_RDS_ATTRIBUTES = {
     "final_snapshot_identifier": "protect_rds_final_snapshot_identifier",
     "deletion_protection": "protect_rds_deletion_protection",
 }
+
+
+def replace_attribute_names(replace_paths):
+    """Extrai somente nomes de atributos dos caminhos de substituição."""
+    if not isinstance(replace_paths, list):
+        return []
+
+    names = set()
+    for path in replace_paths:
+        if not isinstance(path, list):
+            continue
+        for step in path:
+            if isinstance(step, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", step):
+                names.add(step)
+    return sorted(names)
 
 
 def validate_plan(plan):
@@ -42,7 +58,9 @@ def validate_plan(plan):
         if actions not in (["no-op"], ["read"]):
             actionable_changes += 1
         if "delete" in actions:
-            violations.append((address, action_label, "block_delete_or_replace"))
+            attributes = replace_attribute_names(change.get("replace_paths", []))
+            detail = f" atributos_replace={','.join(attributes)}" if attributes else ""
+            violations.append((address, action_label, f"block_delete_or_replace{detail}"))
         if resource.get("type") != "aws_db_instance":
             continue
         before = change.get("before") or {}
