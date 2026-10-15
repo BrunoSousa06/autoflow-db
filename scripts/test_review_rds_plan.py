@@ -1,11 +1,31 @@
 import unittest
+from unittest.mock import patch
 
-from review_rds_plan import validate_plan
+from review_rds_plan import review_plan_file, validate_plan
 
 
 class ReviewRdsPlanTests(unittest.TestCase):
     def test_accepts_no_changes(self):
         self.assertEqual(validate_plan({"resource_changes": []}), 0)
+
+    def test_noop_and_data_source_reads_are_no_changes(self):
+        plan = {
+            "resource_changes": [
+                {
+                    "address": "aws_db_instance.autoflow_rds",
+                    "type": "aws_db_instance",
+                    "change": {
+                        "actions": ["no-op"],
+                        "before": {"identifier": "rds-name", "deletion_protection": True},
+                        "after": {"identifier": "rds-name", "deletion_protection": True},
+                    },
+                },
+                {"address": "data.aws_eks_cluster.autoflow", "change": {"actions": ["read"]}},
+            ],
+            "planned_values": {"root_module": {"resources": []}},
+            "prior_state": {"values": {"root_module": {"resources": []}}},
+        }
+        self.assertEqual(validate_plan(plan), 0)
 
     def test_accepts_non_destructive_changes(self):
         plan = {
@@ -22,7 +42,9 @@ class ReviewRdsPlanTests(unittest.TestCase):
                 {"address": "aws_db_instance.autoflow_rds", "change": {"actions": ["delete"]}}
             ]
         }
-        with self.assertRaisesRegex(ValueError, "exclusão/substituição"):
+        with self.assertRaisesRegex(
+            ValueError, r"aws_db_instance\.autoflow_rds \[delete\] regra=block_delete_or_replace"
+        ):
             validate_plan(plan)
 
     def test_rejects_replace_even_for_network_resources(self):
@@ -31,16 +53,18 @@ class ReviewRdsPlanTests(unittest.TestCase):
                 {"address": "aws_subnet.private", "change": {"actions": ["delete", "create"]}}
             ]
         }
-        with self.assertRaisesRegex(ValueError, "exclusão/substituição"):
+        with self.assertRaisesRegex(
+            ValueError, r"aws_subnet\.private \[delete,create\] regra=block_delete_or_replace"
+        ):
             validate_plan(plan)
 
     def test_rejects_change_to_rds_identifier_or_backup_configuration(self):
-        for attribute in (
-            "identifier",
-            "backup_retention_period",
-            "skip_final_snapshot",
-            "final_snapshot_identifier",
-            "deletion_protection",
+        for attribute, rule in (
+            ("identifier", "protect_rds_identifier"),
+            ("backup_retention_period", "protect_rds_backup_retention"),
+            ("skip_final_snapshot", "protect_rds_skip_final_snapshot"),
+            ("final_snapshot_identifier", "protect_rds_final_snapshot_identifier"),
+            ("deletion_protection", "protect_rds_deletion_protection"),
         ):
             with self.subTest(attribute=attribute):
                 plan = {
@@ -56,8 +80,37 @@ class ReviewRdsPlanTests(unittest.TestCase):
                         }
                     ]
                 }
-                with self.assertRaisesRegex(ValueError, "exclusão/substituição"):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    rf"aws_db_instance\.autoflow_rds \[update\] regra={rule}",
+                ):
                     validate_plan(plan)
+
+    def test_json_diagnostics_do_not_expose_terraform_stderr(self):
+        secret = "sensitive-plan-content"
+        with patch("review_rds_plan.read_plan", side_effect=__import__("json").JSONDecodeError(secret, "", 0)):
+            with self.assertRaisesRegex(RuntimeError, r"terraform_show_invalid_json line=1 column=1") as error:
+                review_plan_file("rds.tfplan")
+        self.assertNotIn(secret, str(error.exception))
+
+    def test_terraform_show_failure_does_not_expose_stderr(self):
+        import subprocess
+
+        secret = "sensitive-plan-content"
+        failure = subprocess.CalledProcessError(1, "terraform", stderr=secret)
+        with patch("review_rds_plan.read_plan", side_effect=failure):
+            with self.assertRaisesRegex(RuntimeError, "terraform_show_failed exit_code=1") as error:
+                review_plan_file("rds.tfplan")
+        self.assertNotIn(secret, str(error.exception))
+
+    def test_rejects_plan_without_resource_changes(self):
+        with self.assertRaisesRegex(ValueError, "resource_changes ausente"):
+            validate_plan({"planned_values": {}, "prior_state": {}})
+
+    def test_rejects_resource_change_without_actions(self):
+        plan = {"resource_changes": [{"address": "aws_db_instance.autoflow_rds", "change": {}}]}
+        with self.assertRaisesRegex(ValueError, "ações de recurso inválidas"):
+            validate_plan(plan)
 
 
 if __name__ == "__main__":

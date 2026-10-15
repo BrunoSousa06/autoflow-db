@@ -6,36 +6,59 @@ import sys
 from pathlib import Path
 
 PROTECTED_RDS_ATTRIBUTES = {
-    "identifier",
-    "backup_retention_period",
-    "skip_final_snapshot",
-    "final_snapshot_identifier",
-    "deletion_protection",
+    "identifier": "protect_rds_identifier",
+    "backup_retention_period": "protect_rds_backup_retention",
+    "skip_final_snapshot": "protect_rds_skip_final_snapshot",
+    "final_snapshot_identifier": "protect_rds_final_snapshot_identifier",
+    "deletion_protection": "protect_rds_deletion_protection",
 }
 
 
 def validate_plan(plan):
     """Rejeita exclusões/replace e alterações em identidade/backup do RDS."""
-    deletions = [
-        resource.get("address", "recurso sem endereço")
-        for resource in plan.get("resource_changes", [])
-        if "delete" in resource.get("change", {}).get("actions", [])
-    ]
-    protected_changes = []
-    for resource in plan.get("resource_changes", []):
+    if not isinstance(plan, dict) or "resource_changes" not in plan:
+        raise ValueError("Plano inválido: resource_changes ausente.")
+    resource_changes = plan["resource_changes"]
+    if not isinstance(resource_changes, list):
+        raise ValueError("Plano inválido: resource_changes não é uma lista.")
+
+    violations = []
+    actionable_changes = 0
+    for resource in resource_changes:
+        if not isinstance(resource, dict):
+            raise ValueError("Plano inválido: entrada de resource_changes inválida.")
+        address = resource.get("address", "<endereço ausente>")
+        change = resource.get("change", {})
+        if not isinstance(change, dict):
+            raise ValueError("Plano inválido: change de recurso inválido.")
+        actions = change.get("actions", [])
+        if (
+            not isinstance(actions, list)
+            or not actions
+            or not all(isinstance(action, str) for action in actions)
+        ):
+            raise ValueError("Plano inválido: ações de recurso inválidas.")
+        action_label = ",".join(actions)
+        if actions not in (["no-op"], ["read"]):
+            actionable_changes += 1
+        if "delete" in actions:
+            violations.append((address, action_label, "block_delete_or_replace"))
         if resource.get("type") != "aws_db_instance":
             continue
-        change = resource.get("change", {})
         before = change.get("before") or {}
         after = change.get("after") or {}
-        protected_changes.extend(
-            f"{resource.get('address', 'RDS')}.{attribute}"
-            for attribute in PROTECTED_RDS_ATTRIBUTES
-            if before.get(attribute) != after.get(attribute)
+        if not isinstance(before, dict) or not isinstance(after, dict):
+            raise ValueError("Plano inválido: atributos do RDS inválidos.")
+        for attribute, rule in PROTECTED_RDS_ATTRIBUTES.items():
+            if before.get(attribute) != after.get(attribute):
+                violations.append((address, action_label, rule))
+    if violations:
+        details = "; ".join(
+            f"{address} [{actions}] regra={rule}"
+            for address, actions, rule in violations
         )
-    if deletions or protected_changes:
-        raise ValueError("Plano bloqueado: contém exclusão/substituição de recursos.")
-    return len(plan.get("resource_changes", []))
+        raise ValueError(f"Plano bloqueado: {details}")
+    return actionable_changes
 
 
 def read_plan(path):
@@ -50,14 +73,24 @@ def read_plan(path):
     return json.loads(result.stdout)
 
 
+def review_plan_file(path):
+    """Executa Terraform show sem propagar stdout/stderr potencialmente sensíveis."""
+    try:
+        return validate_plan(read_plan(path))
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(f"terraform_show_failed exit_code={error.returncode}") from None
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"terraform_show_invalid_json line={error.lineno} column={error.colno}") from None
+
+
 def main():
     if len(sys.argv) != 2:
         print("Uso: python review_rds_plan.py <arquivo.tfplan>", file=sys.stderr)
         return 2
     try:
-        count = validate_plan(read_plan(sys.argv[1]))
-    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError, ValueError):
-        print("Plano Terraform inválido ou bloqueado pela política de segurança.", file=sys.stderr)
+        count = review_plan_file(sys.argv[1])
+    except (OSError, ValueError, RuntimeError) as error:
+        print(str(error), file=sys.stderr)
         return 1
     if count == 0:
         print("Plano aprovado: No changes.")
