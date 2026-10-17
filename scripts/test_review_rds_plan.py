@@ -1,10 +1,19 @@
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from review_rds_plan import review_plan_file, validate_plan
 
 
 class ReviewRdsPlanTests(unittest.TestCase):
+    def test_workflow_dispatch_runs_plan_and_approved_apply_on_develop(self):
+        workflow = (Path(__file__).parents[1] / ".github/workflows/pipeline.yml").read_text(encoding="utf-8")
+        condition = "github.ref == 'refs/heads/develop' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')"
+        plan, apply = workflow.split("  plan:", 1)[1].split("  apply:", 1)[0], workflow.split("  apply:", 1)[1]
+        self.assertIn(condition, plan)
+        self.assertIn(condition, apply)
+        self.assertIn("environment: homolog", apply)
+
     def test_accepts_no_changes(self):
         self.assertEqual(validate_plan({"resource_changes": []}), 0)
 
