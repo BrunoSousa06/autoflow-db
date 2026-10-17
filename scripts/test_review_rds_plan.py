@@ -45,6 +45,28 @@ class ReviewRdsPlanTests(unittest.TestCase):
         }
         self.assertEqual(validate_plan(plan), 2)
 
+    def test_accepts_initial_rds_creation_with_protected_attributes(self):
+        plan = {
+            "resource_changes": [
+                {
+                    "address": "aws_db_instance.autoflow_rds",
+                    "type": "aws_db_instance",
+                    "change": {
+                        "actions": ["create"],
+                        "before": None,
+                        "after": {
+                            "identifier": "autoflow-db",
+                            "backup_retention_period": 1,
+                            "skip_final_snapshot": False,
+                            "final_snapshot_identifier": "autoflow-db-final",
+                            "deletion_protection": True,
+                        },
+                    },
+                }
+            ]
+        }
+        self.assertEqual(validate_plan(plan), 1)
+
     def test_rejects_destroy_of_any_resource(self):
         plan = {
             "resource_changes": [
