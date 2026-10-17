@@ -37,7 +37,7 @@ jobs:
 
   plan:
     name: Terraform Plan homolog
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    if: github.ref == 'refs/heads/develop' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: validate
     runs-on: ubuntu-latest
     env:
@@ -88,15 +88,22 @@ jobs:
           python scripts/verify_aws_account.py
           test "$(aws ec2 describe-availability-zones --region "$AWS_REGION" --query 'AvailabilityZones[0].RegionName' --output text)" = "$AWS_REGION"
           aws s3api head-bucket --bucket "$TF_STATE_BUCKET"
-          aws s3api head-object --bucket "$TF_STATE_BUCKET" --key "$TF_STATE_KEY" > /dev/null
           aws s3api head-object --bucket "$TF_STATE_BUCKET" --key "$TF_VAR_infra_state_key" > /dev/null
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.16.5"
           terraform_wrapper: false
       - name: Inicializar state remoto existente
-        working-directory: infra
-        run: terraform init -input=false -reconfigure -backend-config="bucket=$TF_STATE_BUCKET" -backend-config="key=$TF_STATE_KEY" -backend-config="region=$AWS_REGION" -backend-config="encrypt=true" -backend-config="use_lockfile=true"
+        env:
+          AWS_TERRAFORM_STATE_BUCKET: ${{ vars.AWS_TERRAFORM_STATE_BUCKET }}
+          AWS_TF_STATE_KEY: ${{ vars.AWS_TF_STATE_KEY }}
+        run: |
+          python scripts/state_resource_guard.py --bucket "$AWS_TERRAFORM_STATE_BUCKET" --key "$AWS_TF_STATE_KEY" -- aws rds describe-db-instances --db-instance-identifier autoflow-db --query 'DBInstances[0].DBInstanceIdentifier' --output text
+          python scripts/state_resource_guard.py --bucket "$AWS_TERRAFORM_STATE_BUCKET" --key "$AWS_TF_STATE_KEY" -- aws rds describe-db-subnet-groups --db-subnet-group-name autoflow-db-subnet-group --query 'DBSubnetGroups[0].DBSubnetGroupName' --output text
+          python scripts/state_resource_guard.py --bucket "$AWS_TERRAFORM_STATE_BUCKET" --key "$AWS_TF_STATE_KEY" -- aws ec2 describe-security-groups --region "$AWS_REGION" --filters Name=group-name,Values=autoflow-rds-sg --query 'SecurityGroups[0].GroupId' --output text
+          python scripts/state_resource_guard.py --bucket "$AWS_TERRAFORM_STATE_BUCKET" --key "$AWS_TF_STATE_KEY" -- aws ec2 describe-security-groups --region "$AWS_REGION" --filters Name=group-name,Values=autoflow-lambda-sg --query 'SecurityGroups[0].GroupId' --output text
+          cd infra
+          terraform init -input=false -reconfigure -backend-config="bucket=$TF_STATE_BUCKET" -backend-config="key=$TF_STATE_KEY" -backend-config="region=$AWS_REGION" -backend-config="encrypt=true" -backend-config="use_lockfile=true"
       - name: Terraform validate
         working-directory: infra
         run: terraform validate
@@ -123,7 +130,7 @@ jobs:
 
   apply:
     name: Terraform Apply homolog (aprovação requerida)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    if: github.ref == 'refs/heads/develop' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: plan
     runs-on: ubuntu-latest
     environment: homolog
@@ -188,7 +195,6 @@ jobs:
           python scripts/verify_aws_account.py
           test "$(aws ec2 describe-availability-zones --region "$AWS_REGION" --query 'AvailabilityZones[0].RegionName' --output text)" = "$AWS_REGION"
           aws s3api head-bucket --bucket "$TF_STATE_BUCKET"
-          aws s3api head-object --bucket "$TF_STATE_BUCKET" --key "$TF_STATE_KEY" > /dev/null
           aws s3api head-object --bucket "$TF_STATE_BUCKET" --key "$TF_VAR_infra_state_key" > /dev/null
       - uses: hashicorp/setup-terraform@v3
         with:
