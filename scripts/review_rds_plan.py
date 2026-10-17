@@ -67,6 +67,10 @@ def validate_plan(plan):
         after = change.get("after") or {}
         if not isinstance(before, dict) or not isinstance(after, dict):
             raise ValueError("Plano inválido: atributos do RDS inválidos.")
+        # Valores definidos em uma criação inicial não são alterações de
+        # identidade/backup em um recurso já existente.
+        if actions == ["create"] and not before:
+            continue
         for attribute, rule in PROTECTED_RDS_ATTRIBUTES.items():
             if before.get(attribute) != after.get(attribute):
                 violations.append((address, action_label, rule))
